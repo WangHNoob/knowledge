@@ -242,7 +242,7 @@ const network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, {
   physics: {
     solver: "forceAtlas2Based",
     forceAtlas2Based: { gravitationalConstant: -50, springLength: 90, avoidOverlap: 0.3 },
-    stabilization: { iterations: 200 }
+    stabilization: { iterations: 300, onlyDynamicEdges: false, fit: true },
   },
   interaction: { hover: true, tooltipDelay: 150 },
   nodes: { shape: "dot", size: 14, font: { color: "#fff", size: 13 } },
@@ -286,6 +286,11 @@ edgesDS.add(RAW_EDGES);
 ['f_doc','f_system','f_activity','f_concept','f_resource','f_attribute','f_table','f_fk']
   .forEach(id => document.getElementById(id).addEventListener('change', applyFilters));
 document.getElementById('search').addEventListener('input', applyFilters);
+
+// 稳定化完成后关闭物理引擎，节点不再漂移
+network.once('stabilizationIterationsDone', () => {
+  network.setOptions({ physics: false });
+});
 
 // 节点点击：展示详情 + 邻居
 const detailEl = document.getElementById('detail');
