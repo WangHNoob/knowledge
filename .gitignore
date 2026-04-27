@@ -58,3 +58,4 @@ raw/gamedata/*
 # Environment
 .env
 .env.local
+old/
