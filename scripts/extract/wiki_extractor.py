@@ -407,7 +407,7 @@ def extract_all(force: bool = False, only: Optional[str] = None) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Per-docx LLM wiki extraction")
+    parser = argparse.ArgumentParser(description="LLM 语义提取：docx → 结构化 wiki")
     parser.add_argument("-f", "--force", action="store_true",
                         help="忽略缓存，全部重新抽取")
     parser.add_argument("--only", type=str, default=None,

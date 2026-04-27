@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Convert stage: docx/xlsx → parsed markdown."""
+"""Convert 阶段：docx/xlsx → 解析后的 markdown"""
 from scripts.convert.batch_convert import batch_convert
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Convert gamedocs docx to parsed markdown")
+    parser = argparse.ArgumentParser(description="将策划文档 docx 转换为 markdown")
     parser.add_argument("input_dir", nargs="?", default=None,
                         help="策划文档目录 (默认: KB_DATA_DIR/gamedocs)")
     parser.add_argument("-f", "--force", action="store_true",

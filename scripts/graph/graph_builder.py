@@ -383,7 +383,7 @@ def run() -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Deterministic graph assembly from wiki/_meta/*.json"
+        description="确定性图谱组装：从 wiki/_meta/*.json 生成 graph.json"
     )
     parser.parse_args()
     run()

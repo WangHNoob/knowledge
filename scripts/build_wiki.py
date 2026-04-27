@@ -52,7 +52,7 @@ def run(stage: str | None = None, force: bool = False,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build the wiki pipeline")
+    parser = argparse.ArgumentParser(description="构建 Wiki 知识库 pipeline")
     parser.add_argument("--stage", choices=STAGES, default=None,
                         help="只执行单个阶段；默认串联 convert->extract->graph")
     parser.add_argument("-f", "--force", action="store_true",

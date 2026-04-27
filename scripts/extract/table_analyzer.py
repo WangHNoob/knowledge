@@ -411,7 +411,7 @@ def run(force: bool = False) -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Deterministic xlsx table analysis")
+    parser = argparse.ArgumentParser(description="确定性 xlsx 表分析")
     parser.add_argument("-f", "--force", action="store_true",
                         help="忽略缓存，重新读取所有 xlsx 头部")
     args = parser.parse_args()

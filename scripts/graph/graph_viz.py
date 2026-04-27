@@ -41,6 +41,17 @@ TYPE_COLORS = {
     "table":     "#90a4ae",   # 灰：配置表
 }
 
+# 节点类型中文映射
+TYPE_LABELS = {
+    "doc":       "文档",
+    "system":    "系统",
+    "activity":  "活动",
+    "concept":   "概念",
+    "resource":  "资源",
+    "attribute": "属性",
+    "table":     "配置表",
+}
+
 
 def _load_graph() -> dict:
     with open(GRAPH_JSON, "r", encoding="utf-8") as f:
@@ -186,8 +197,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <label><input type="checkbox" id="f_resource" checked> 资源 (resource)</label>
   <label><input type="checkbox" id="f_attribute" checked> 属性 (attribute)</label>
   <label><input type="checkbox" id="f_table"    checked> 配置表 (table)</label>
-  <label><input type="checkbox" id="f_fk"       checked> 显示 FK 虚线边</label>
-  <input type="text" id="search" placeholder="搜索节点..." />
+  <label><input type="checkbox" id="f_fk"       checked> 显示外键关系 (FK)</label>
+  <input type="text" id="search" placeholder="搜索节点名称..." />
 </div>
 <div id="detail"></div>
 <div id="graph"></div>
@@ -196,12 +207,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 const RAW_NODES = __NODES__;
 const RAW_EDGES = __EDGES__;
 const TYPE_COLORS = __COLORS__;
+const TYPE_LABELS = __LABELS__;
 
 const legendEl = document.getElementById('legend');
 Object.entries(TYPE_COLORS).forEach(([t, c]) => {
   const s = document.createElement('span');
   s.style.background = c;
-  s.textContent = t;
+  s.textContent = TYPE_LABELS[t] || t;
   legendEl.appendChild(s);
 });
 document.getElementById('stats').innerHTML =
@@ -281,7 +293,7 @@ network.on('click', params => {
     ? `<p><a href="${n.wiki_page}" target="_blank">打开 wiki 页面</a></p>` : '';
   detailEl.innerHTML = `
     <h3 style="margin:0 0 6px">${n.id}</h3>
-    <p style="color:#aaa;margin:0">type: ${n.group}</p>
+    <p style="color:#aaa;margin:0">类型: ${TYPE_LABELS[n.group] || n.group}</p>
     ${pageLink}
     <p><b>出边 (${outgoing ? neighbors.filter(e=>e.from===id).length : 0}):</b></p>
     <ul style="margin:4px 0 8px;padding-left:18px">${outgoing || '<li style="color:#666">无</li>'}</ul>
@@ -312,7 +324,8 @@ def run(open_browser: bool = False) -> str:
     html = (HTML_TEMPLATE
             .replace("__NODES__", json.dumps(nodes, ensure_ascii=False))
             .replace("__EDGES__", json.dumps(edges, ensure_ascii=False))
-            .replace("__COLORS__", json.dumps(TYPE_COLORS, ensure_ascii=False)))
+            .replace("__COLORS__", json.dumps(TYPE_COLORS, ensure_ascii=False))
+            .replace("__LABELS__", json.dumps(TYPE_LABELS, ensure_ascii=False)))
 
     with open(HTML_OUT, "w", encoding="utf-8") as f:
         f.write(html)
@@ -324,7 +337,7 @@ def run(open_browser: bool = False) -> str:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Interactive wiki graph visualization")
+    parser = argparse.ArgumentParser(description="交互式知识图谱可视化")
     parser.add_argument("--open", action="store_true", help="生成后在浏览器打开")
     args = parser.parse_args()
     run(open_browser=args.open)
