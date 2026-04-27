@@ -1,0 +1,241 @@
+# -*- coding: utf-8 -*-
+"""
+确定性图谱组装（无 LLM）
+
+读取 knowledge/wiki/_meta/*.json，合并同名实体，生成：
+  knowledge/wiki/graph.json
+  knowledge/wiki/index.md
+
+输出可复现：实体按名字字典序排序，边按 (source, target, relation, from_doc) 排序。
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+WIKI_DIR = os.path.join(PROJECT_ROOT, "knowledge", "wiki")
+META_DIR = os.path.join(WIKI_DIR, "_meta")
+GRAPH_PATH = os.path.join(WIKI_DIR, "graph.json")
+INDEX_PATH = os.path.join(WIKI_DIR, "index.md")
+
+PAGE_TYPE_DIRS = {
+    "system_rule": "systems",
+    "table_schema": "tables",
+    "numerical_convention": "numerical",
+    "activity_template": "activities",
+    "combat_framework": "combat",
+}
+
+
+def _load_metas() -> list[dict]:
+    if not os.path.isdir(META_DIR):
+        return []
+    metas = []
+    for fn in sorted(os.listdir(META_DIR)):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(META_DIR, fn), "r", encoding="utf-8") as f:
+                metas.append(json.load(f))
+        except Exception as e:
+            print(f"[warn] failed to load {fn}: {e}", file=sys.stderr)
+    return metas
+
+
+def _merge_entities(metas: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+    """合并同名实体。返回 (name -> resolved_type, name -> wiki_page or '')。"""
+    type_votes: dict[str, collections.Counter] = collections.defaultdict(
+        collections.Counter
+    )
+    for m in metas:
+        for e in m.get("entities") or []:
+            name = e.get("name")
+            etype = e.get("type")
+            if name and etype:
+                type_votes[name][etype] += 1
+
+    # wiki_page 来自 meta.title 与 meta.wiki_path 的映射
+    title_to_page: dict[str, str] = {}
+    for m in metas:
+        title = m.get("title")
+        wp = m.get("wiki_path")
+        if title and wp and title not in title_to_page:
+            title_to_page[title] = wp
+
+    resolved_type: dict[str, str] = {}
+    wiki_page: dict[str, str] = {}
+    for name, counter in type_votes.items():
+        # 多数票；平票按类型名字典序，保证可复现
+        top = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
+        resolved_type[name] = top[0][0]
+        if len(counter) > 1:
+            print(
+                f"[warn] entity {name!r} has conflicting types: {dict(counter)}; "
+                f"picked {top[0][0]}",
+                file=sys.stderr,
+            )
+        wiki_page[name] = title_to_page.get(name, "")
+    return resolved_type, wiki_page
+
+
+def _collect_edges(metas: list[dict], valid_names: set[str]) -> list[dict]:
+    """收集边，去重 + 过滤端点不在实体集合中的边。"""
+    seen: set[tuple[str, str, str, str]] = set()
+    edges: list[dict] = []
+    for m in metas:
+        src_doc = m.get("source", "")
+        for r in m.get("relationships") or []:
+            s = r.get("source")
+            t = r.get("target")
+            rel = r.get("relation")
+            if not s or not t or not rel:
+                continue
+            if s not in valid_names or t not in valid_names:
+                continue
+            key = (s, t, rel, src_doc)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({
+                "source": s, "target": t,
+                "relation": rel, "from_doc": src_doc,
+            })
+    edges.sort(key=lambda e: (e["source"], e["target"],
+                              e["relation"], e["from_doc"]))
+    return edges
+
+
+def build_graph() -> dict:
+    metas = _load_metas()
+    resolved_type, wiki_page = _merge_entities(metas)
+
+    nodes = [
+        {"id": name, "type": resolved_type[name],
+         "wiki_page": wiki_page.get(name) or None}
+        for name in sorted(resolved_type.keys())
+    ]
+    edges = _collect_edges(metas, set(resolved_type.keys()))
+
+    return {"nodes": nodes, "edges": edges, "_meta_count": len(metas)}
+
+
+def write_graph(graph: dict) -> None:
+    os.makedirs(WIKI_DIR, exist_ok=True)
+    serializable = {"nodes": graph["nodes"], "edges": graph["edges"]}
+    with open(GRAPH_PATH, "w", encoding="utf-8") as f:
+        json.dump(serializable, f, ensure_ascii=False, indent=2, sort_keys=False)
+
+
+def write_index(graph: dict, metas: list[dict]) -> None:
+    nodes = graph["nodes"]
+    edges = graph["edges"]
+
+    # 按页面类型分组
+    by_type: dict[str, list[dict]] = collections.defaultdict(list)
+    for m in metas:
+        pt = m.get("page_type") or "unknown"
+        by_type[pt].append(m)
+
+    # 入度统计：最常被引用的实体
+    indeg: collections.Counter = collections.Counter()
+    for e in edges:
+        indeg[e["target"]] += 1
+    top_entities = indeg.most_common(20)
+
+    # 类型分布
+    type_dist: collections.Counter = collections.Counter(n["type"] for n in nodes)
+    rel_dist: collections.Counter = collections.Counter(e["relation"] for e in edges)
+
+    lines: list[str] = []
+    lines.append("---")
+    lines.append("title: Wiki Knowledge Index")
+    lines.append("type: index")
+    lines.append("---")
+    lines.append("")
+    lines.append("# Wiki 知识索引")
+    lines.append("")
+    lines.append("## 概览")
+    lines.append(f"- 文档数: {len(metas)}")
+    lines.append(f"- 实体数: {len(nodes)}")
+    lines.append(f"- 关系数: {len(edges)}")
+    error_docs = [m for m in metas if m.get("error")]
+    if error_docs:
+        lines.append(f"- 提取失败: {len(error_docs)}")
+    lines.append("")
+
+    lines.append("## 页面类型分布")
+    for page_type, dirname in PAGE_TYPE_DIRS.items():
+        count = len(by_type.get(page_type, []))
+        lines.append(f"- `{page_type}` ({dirname}/): {count}")
+    lines.append("")
+
+    lines.append("## 实体类型分布")
+    for t, c in sorted(type_dist.items(), key=lambda kv: (-kv[1], kv[0])):
+        lines.append(f"- `{t}`: {c}")
+    lines.append("")
+
+    lines.append("## 关系类型分布")
+    for t, c in sorted(rel_dist.items(), key=lambda kv: (-kv[1], kv[0])):
+        lines.append(f"- `{t}`: {c}")
+    lines.append("")
+
+    if top_entities:
+        lines.append("## 被引用最多的实体 (Top 20)")
+        lines.append("| 实体 | 被引用次数 | 类型 | Wiki 页面 |")
+        lines.append("|------|-----------|------|-----------|")
+        type_map = {n["id"]: n["type"] for n in nodes}
+        page_map = {n["id"]: n["wiki_page"] for n in nodes}
+        for name, count in top_entities:
+            page = page_map.get(name) or "—"
+            lines.append(f"| {name} | {count} | {type_map.get(name, '?')} | {page} |")
+        lines.append("")
+
+    lines.append("## Wiki 页面清单")
+    for page_type, dirname in PAGE_TYPE_DIRS.items():
+        subset = sorted(by_type.get(page_type, []), key=lambda m: m.get("title") or "")
+        if not subset:
+            continue
+        lines.append(f"### {page_type} — `{dirname}/`")
+        for m in subset:
+            title = m.get("title") or m.get("source")
+            src = m.get("source")
+            wp = m.get("wiki_path") or "?"
+            lines.append(f"- [{title}]({wp}) — 来源: {src}")
+        lines.append("")
+
+    if error_docs:
+        lines.append("## 提取失败文档")
+        for m in error_docs:
+            lines.append(f"- {m.get('source')}: {m.get('error')}")
+        lines.append("")
+
+    with open(INDEX_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def run() -> None:
+    metas = _load_metas()
+    if not metas:
+        print("没有 meta 文件，请先运行 wiki_extractor.py")
+        return
+    graph = build_graph()
+    write_graph(graph)
+    write_index(graph, metas)
+    print(f"写入 {GRAPH_PATH}")
+    print(f"  nodes: {len(graph['nodes'])}  edges: {len(graph['edges'])}")
+    print(f"写入 {INDEX_PATH}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Deterministic graph assembly from wiki/_meta/*.json"
+    )
+    parser.parse_args()
+    run()

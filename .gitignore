@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# WorkBuddy internal
+.workbuddy/
+
+# Knowledge base source data (tracked outside VCS due to size)
+knowledge/gamedata/
+knowledge/gamedocs/
+
+# Knowledge base caches and generated artifacts
+knowledge/**/.cache/
+knowledge/wiki/
+knowledge/graph/
+knowledge/table_registry.json
+knowledge/index.db
+knowledge/index.db-wal
+knowledge/index.db-shm
+
+# Environment
+.env
+.env.local

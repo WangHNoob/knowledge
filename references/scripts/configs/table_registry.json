@@ -1,0 +1,12 @@
+{
+  "ResourceDef": "gamedata/资源表.xlsx",
+  "ResourceYield": "gamedata/资源表.xlsx",
+  "BuildingData": "gamedata/建筑表.xlsx",
+  "UnitData": "gamedata/单位数据.xlsx",
+  "TechTree": "gamedata/科技树.xlsx",
+  "TechDependency": "gamedata/科技依赖.xlsx",
+  "EventData": "gamedata/事件表.xlsx",
+  "ResourceFlow": "gamedata/资源流通.xlsx",
+  "BuildingChain": "gamedata/建筑升级链.xlsx",
+  "UnitSkills": "gamedata/单位数据.xlsx"
+}
