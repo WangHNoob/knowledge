@@ -26,21 +26,19 @@ import hashlib
 import json
 import os
 import re
-import sys
 import time
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from .config import PATHS
 
-
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-GAMEDATA_DIR = os.path.join(PROJECT_ROOT, "knowledge", "gamedata")
-WIKI_DIR = os.path.join(PROJECT_ROOT, "knowledge", "wiki")
-TABLES_DIR = os.path.join(WIKI_DIR, "tables")
-REGISTRY_DIR = os.path.join(WIKI_DIR, "_tables")
-SCHEMAS_PATH = os.path.join(REGISTRY_DIR, "schemas.json")
-GROUPS_PATH = os.path.join(REGISTRY_DIR, "groups.json")
-FK_PATH = os.path.join(REGISTRY_DIR, "table_fk_registry.json")
+PROJECT_ROOT = str(PATHS.project_root)
+GAMEDATA_DIR = str(PATHS.gamedata_dir)
+WIKI_DIR = str(PATHS.wiki_dir)
+TABLES_DIR = str(PATHS.wiki_tables_dir)
+REGISTRY_DIR = str(PATHS.wiki_tables_registry_dir)
+SCHEMAS_PATH = str(PATHS.schemas_json_path)
+GROUPS_PATH = str(PATHS.groups_json_path)
+FK_PATH = str(PATHS.fk_registry_json_path)
 
 HEADER_ROW_CANDIDATES = (1, 2, 3)  # 策划表常把第 1 行用作中文注释，第 2/3 行才是字段名
 MIN_FIELDS = 2  # 少于这个数的 header 当无效

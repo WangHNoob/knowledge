@@ -15,16 +15,13 @@ Wiki 构建编排器
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import batch_convert
-import wiki_extractor
-import table_analyzer
-import graph_builder
-import graph_viz
+from . import batch_convert
+from . import graph_builder
+from . import graph_viz
+from . import table_analyzer
+from . import wiki_extractor
+from .config import PATHS
 
 
 STAGES = ("convert", "extract", "tables", "graph", "viz")
@@ -41,7 +38,7 @@ def run(stage: str | None = None, force: bool = False,
         print(f"\n========== stage: {s} ==========")
         if s == "convert":
             batch_convert.batch_convert(
-                input_dir=os.path.join("knowledge", "gamedocs"),
+                input_dir=str(PATHS.gamedocs_dir),
                 force=force,
             )
         elif s == "extract":

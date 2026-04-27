@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "kb-builder"
 version = "0.1.0"
@@ -8,7 +12,11 @@ dependencies = [
     "markitdown[docx,xlsx]>=0.1.0",
     "openpyxl>=3.1.0",
     "python-docx>=1.1.0",
+    "python-dotenv>=1.0",
 ]
+
+[project.scripts]
+kb-builder = "kb_builder.cli:main"
 
 [project.optional-dependencies]
 graph = [
@@ -17,8 +25,10 @@ graph = [
 llm = [
     "litellm>=1.0",
     "openai>=1.0",
-    "python-dotenv>=1.0",
 ]
 dev = [
     "kb-builder[graph,llm]",
 ]
+
+[tool.setuptools]
+packages = ["kb_builder"]

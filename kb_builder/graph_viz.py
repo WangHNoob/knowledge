@@ -20,17 +20,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import webbrowser
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from .config import PATHS
 
-
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-WIKI_DIR = os.path.join(PROJECT_ROOT, "knowledge", "wiki")
-GRAPH_JSON = os.path.join(WIKI_DIR, "graph.json")
-FK_REGISTRY = os.path.join(WIKI_DIR, "_tables", "table_fk_registry.json")
-HTML_OUT = os.path.join(WIKI_DIR, "graph.html")
+PROJECT_ROOT = str(PATHS.project_root)
+WIKI_DIR = str(PATHS.wiki_dir)
+GRAPH_JSON = str(PATHS.graph_json_path)
+FK_REGISTRY = str(PATHS.fk_registry_json_path)
+HTML_OUT = str(PATHS.graph_html_path)
 
 # 节点类型 → 颜色（vis.js group）
 TYPE_COLORS = {

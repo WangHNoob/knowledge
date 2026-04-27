@@ -17,16 +17,15 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from .config import PATHS
 
-
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-WIKI_DIR = os.path.join(PROJECT_ROOT, "knowledge", "wiki")
-META_DIR = os.path.join(WIKI_DIR, "_meta")
-TABLES_REGISTRY_DIR = os.path.join(WIKI_DIR, "_tables")
-SCHEMAS_PATH = os.path.join(TABLES_REGISTRY_DIR, "schemas.json")
-GRAPH_PATH = os.path.join(WIKI_DIR, "graph.json")
-INDEX_PATH = os.path.join(WIKI_DIR, "index.md")
+PROJECT_ROOT = str(PATHS.project_root)
+WIKI_DIR = str(PATHS.wiki_dir)
+META_DIR = str(PATHS.wiki_meta_dir)
+TABLES_REGISTRY_DIR = str(PATHS.wiki_tables_registry_dir)
+SCHEMAS_PATH = str(PATHS.schemas_json_path)
+GRAPH_PATH = str(PATHS.graph_json_path)
+INDEX_PATH = str(PATHS.index_md_path)
 
 PAGE_TYPE_DIRS = {
     "system_rule": "systems",

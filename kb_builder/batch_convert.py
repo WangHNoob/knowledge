@@ -8,20 +8,19 @@
 支持懒加载：已有缓存且源文件未更新时跳过。
 """
 import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from doc_reader import scan_dir, read_doc
+from .config import PATHS
+from .doc_reader import scan_dir, read_doc
 
 
-def batch_convert(input_dir="knowledge/gamedocs", force=False):
+def batch_convert(input_dir=None, force=False):
     """批量转换策划文档目录下的 docx 文件。
 
     Args:
-        input_dir: 策划文档目录 (默认 knowledge/gamedocs)
+        input_dir: 策划文档目录 (默认来自 KB_DATA_DIR/gamedocs)
         force: 是否强制重新转换（忽略缓存）
     """
+    input_dir = input_dir or str(PATHS.gamedocs_dir)
     print(f"扫描目录: {input_dir}")
 
     files = scan_dir(input_dir, extensions=['.docx'])
@@ -64,8 +63,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="批量转换策划文档为 md 格式")
-    parser.add_argument("input_dir", nargs="?", default="knowledge/gamedocs",
-                        help="策划文档目录 (默认: knowledge/gamedocs)")
+    parser.add_argument("input_dir", nargs="?", default=None,
+                        help="策划文档目录 (默认: KB_DATA_DIR/gamedocs)")
     parser.add_argument("-f", "--force", action="store_true",
                         help="强制重新转换，忽略已有缓存")
     args = parser.parse_args()

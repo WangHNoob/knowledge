@@ -20,18 +20,16 @@ import hashlib
 import json
 import os
 import re
-import sys
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from .config import PATHS
 
-
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-GAMEDOCS_DIR = os.path.join(PROJECT_ROOT, "knowledge", "gamedocs")
-GAMEDATA_DIR = os.path.join(PROJECT_ROOT, "knowledge", "gamedata")
-WIKI_DIR = os.path.join(PROJECT_ROOT, "knowledge", "wiki")
-META_DIR = os.path.join(WIKI_DIR, "_meta")
-SPECS_DIR = os.path.join(PROJECT_ROOT, "wiki_specs")
+PROJECT_ROOT = str(PATHS.project_root)
+GAMEDOCS_DIR = str(PATHS.gamedocs_dir)
+GAMEDATA_DIR = str(PATHS.gamedata_dir)
+WIKI_DIR = str(PATHS.wiki_dir)
+META_DIR = str(PATHS.wiki_meta_dir)
+SPECS_DIR = str(PATHS.wiki_specs_dir)
 
 ENTITY_TYPES = {"system", "table", "resource", "attribute", "activity", "concept"}
 RELATION_TYPES = {
@@ -107,11 +105,8 @@ def _read_cached_md(docx_path: str) -> Optional[str]:
 
 def _build_prompt(raw_md: str, source_name: str, specs: dict[str, str],
                   table_names: list[str]) -> str:
-    # 截断表名列表以控制 token 数（7500 条会太长）
-    MAX_TABLES = 500
-    tables_str = ", ".join(table_names[:MAX_TABLES])
-    if len(table_names) > MAX_TABLES:
-        tables_str += f" ... (+{len(table_names) - MAX_TABLES} more, truncated)"
+    # 全量注入已知表名，保证 LLM 能按精确表名完成实体对齐。
+    tables_str = ", ".join(table_names)
 
     specs_block = "\n\n".join(
         f"### spec: {name}\n{body}" for name, body in specs.items()
