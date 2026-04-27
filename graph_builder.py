@@ -14,6 +14,7 @@ import argparse
 import collections
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 WIKI_DIR = os.path.join(PROJECT_ROOT, "knowledge", "wiki")
 META_DIR = os.path.join(WIKI_DIR, "_meta")
+TABLES_REGISTRY_DIR = os.path.join(WIKI_DIR, "_tables")
+SCHEMAS_PATH = os.path.join(TABLES_REGISTRY_DIR, "schemas.json")
 GRAPH_PATH = os.path.join(WIKI_DIR, "graph.json")
 INDEX_PATH = os.path.join(WIKI_DIR, "index.md")
 
@@ -112,18 +115,128 @@ def _collect_edges(metas: list[dict], valid_names: set[str]) -> list[dict]:
     return edges
 
 
+def _load_table_registry() -> dict:
+    """加载 table_analyzer.py 生成的 schemas.json；不存在时返回 {}。"""
+    if not os.path.exists(SCHEMAS_PATH):
+        return {}
+    try:
+        with open(SCHEMAS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[warn] failed to load {SCHEMAS_PATH}: {e}", file=sys.stderr)
+        return {}
+
+
+def _build_table_nodes(schemas: dict,
+                       existing_entity_names: set[str]) -> list[dict]:
+    """为 gamedata 里所有 xlsx 生成 type=table 节点。
+
+    如果一张表已经是 LLM 抽取出的实体（existing_entity_names），跳过以免重复。
+    wiki_page 指向该表所属表族页面。
+    """
+    nodes: list[dict] = []
+    for tname in sorted(schemas.keys()):
+        if tname in existing_entity_names:
+            continue
+        info = schemas[tname]
+        group = info.get("group") or "_misc"
+        wiki_page = f"tables/{_slugify_group_for_path(group)}.md"
+        nodes.append({
+            "id": tname,
+            "type": "table",
+            "wiki_page": wiki_page,
+            "group": group,
+        })
+    return nodes
+
+
+def _slugify_group_for_path(name: str) -> str:
+    return re.sub(r"[^\w.-]+", "_", name).strip("_") or "_group"
+
+
+def _build_doc_nodes_and_edges(
+    metas: list[dict], entity_types: dict[str, str]
+) -> tuple[list[dict], list[dict]]:
+    """为每个 docx 生成 type=doc 节点，并添加 doc -[references]-> table 边。
+
+    只连接 type=table 的实体（见 WIKI_ARCHITECTURE.md §4 中"表与文档的关系"语义）。
+    """
+    doc_nodes: list[dict] = []
+    doc_edges: list[dict] = []
+    seen_doc_ids: set[str] = set()
+    for m in metas:
+        src = m.get("source")
+        if not src or src in seen_doc_ids:
+            continue
+        seen_doc_ids.add(src)
+        doc_nodes.append({
+            "id": src,
+            "type": "doc",
+            "wiki_page": m.get("wiki_path") or None,
+        })
+        # doc -[references]-> table (仅对表实体连边)
+        emitted: set[str] = set()
+        for e in m.get("entities") or []:
+            name = e.get("name")
+            if not name or name in emitted:
+                continue
+            if entity_types.get(name) != "table":
+                continue
+            emitted.add(name)
+            doc_edges.append({
+                "source": src, "target": name,
+                "relation": "references", "from_doc": src,
+            })
+    doc_nodes.sort(key=lambda n: n["id"])
+    doc_edges.sort(key=lambda e: (e["source"], e["target"],
+                                  e["relation"], e["from_doc"]))
+    return doc_nodes, doc_edges
+
+
 def build_graph() -> dict:
     metas = _load_metas()
     resolved_type, wiki_page = _merge_entities(metas)
 
-    nodes = [
+    # LLM 抽出的实体里，有些名字直接对应一张配置表；
+    # 若 table_analyzer 注册表里能找到，就给它一个 wiki_page 指向表族页面。
+    schemas = _load_table_registry()
+    for name, etype in list(resolved_type.items()):
+        if etype == "table" and name in schemas and not wiki_page.get(name):
+            g = schemas[name].get("group") or "_misc"
+            wiki_page[name] = f"tables/{_slugify_group_for_path(g)}.md"
+
+    entity_nodes = [
         {"id": name, "type": resolved_type[name],
          "wiki_page": wiki_page.get(name) or None}
         for name in sorted(resolved_type.keys())
     ]
-    edges = _collect_edges(metas, set(resolved_type.keys()))
 
-    return {"nodes": nodes, "edges": edges, "_meta_count": len(metas)}
+    # 全量表节点：gamedata 下每个 xlsx 都进图（不重复 LLM 已有实体）
+    entity_name_set = set(resolved_type.keys())
+    table_nodes = _build_table_nodes(schemas, entity_name_set)
+
+    entity_edges = _collect_edges(metas, entity_name_set)
+
+    # doc 节点需要看到所有 type=table 节点（含 table_analyzer 引入的）才能正确建边。
+    all_table_names = entity_name_set | {n["id"] for n in table_nodes}
+    # 对 doc_edges 来说，资源还是 entity_types；构造一个扩展后的类型字典，
+    # 让新的 table 节点也能被识别为 "table"
+    augmented_types = dict(resolved_type)
+    for n in table_nodes:
+        augmented_types[n["id"]] = "table"
+    doc_nodes, doc_edges = _build_doc_nodes_and_edges(metas, augmented_types)
+
+    # 合并：doc 节点排在最前，其次实体节点（按类型+名字），最后是 table 节点
+    nodes = doc_nodes + entity_nodes + table_nodes
+    edges = doc_edges + entity_edges
+    edges.sort(key=lambda e: (e["source"], e["target"],
+                              e["relation"], e["from_doc"]))
+
+    return {
+        "nodes": nodes, "edges": edges,
+        "_meta_count": len(metas),
+        "_table_count": len(schemas),
+    }
 
 
 def write_graph(graph: dict) -> None:
@@ -143,15 +256,24 @@ def write_index(graph: dict, metas: list[dict]) -> None:
         pt = m.get("page_type") or "unknown"
         by_type[pt].append(m)
 
-    # 入度统计：最常被引用的实体
+    # 入度统计：最常被引用的实体（排除 doc->entity 边，避免文档引用稀释实体间排名）
+    type_map = {n["id"]: n["type"] for n in nodes}
     indeg: collections.Counter = collections.Counter()
     for e in edges:
+        if type_map.get(e["source"]) == "doc":
+            continue
         indeg[e["target"]] += 1
     top_entities = indeg.most_common(20)
 
     # 类型分布
     type_dist: collections.Counter = collections.Counter(n["type"] for n in nodes)
     rel_dist: collections.Counter = collections.Counter(e["relation"] for e in edges)
+
+    # 文档 -> 表 引用视图
+    doc_to_tables: dict[str, list[str]] = collections.defaultdict(list)
+    for e in edges:
+        if type_map.get(e["source"]) == "doc" and type_map.get(e["target"]) == "table":
+            doc_to_tables[e["source"]].append(e["target"])
 
     lines: list[str] = []
     lines.append("---")
@@ -161,9 +283,14 @@ def write_index(graph: dict, metas: list[dict]) -> None:
     lines.append("")
     lines.append("# Wiki 知识索引")
     lines.append("")
+    doc_node_count = sum(1 for n in nodes if n["type"] == "doc")
+    table_node_count = sum(1 for n in nodes if n["type"] == "table")
+    entity_node_count = len(nodes) - doc_node_count - table_node_count
+
     lines.append("## 概览")
-    lines.append(f"- 文档数: {len(metas)}")
-    lines.append(f"- 实体数: {len(nodes)}")
+    lines.append(f"- 文档数: {len(metas)} (图中 doc 节点: {doc_node_count})")
+    lines.append(f"- 配置表数: {table_node_count}")
+    lines.append(f"- 其它实体数: {entity_node_count}")
     lines.append(f"- 关系数: {len(edges)}")
     error_docs = [m for m in metas if m.get("error")]
     if error_docs:
@@ -187,14 +314,36 @@ def write_index(graph: dict, metas: list[dict]) -> None:
     lines.append("")
 
     if top_entities:
-        lines.append("## 被引用最多的实体 (Top 20)")
+        lines.append("## 被引用最多的实体 (Top 20，仅实体间关系)")
         lines.append("| 实体 | 被引用次数 | 类型 | Wiki 页面 |")
         lines.append("|------|-----------|------|-----------|")
-        type_map = {n["id"]: n["type"] for n in nodes}
         page_map = {n["id"]: n["wiki_page"] for n in nodes}
         for name, count in top_entities:
             page = page_map.get(name) or "—"
             lines.append(f"| {name} | {count} | {type_map.get(name, '?')} | {page} |")
+        lines.append("")
+
+    if doc_to_tables:
+        lines.append("## 文档 → 引用的配置表")
+        for doc in sorted(doc_to_tables.keys()):
+            tables = sorted(set(doc_to_tables[doc]))
+            lines.append(f"- **{doc}** ({len(tables)}): " + ", ".join(
+                f"`{t}`" for t in tables
+            ))
+        lines.append("")
+
+    # 表族汇总
+    group_counts: collections.Counter = collections.Counter()
+    for n in nodes:
+        if n["type"] == "table":
+            group_counts[n.get("group") or "_misc"] += 1
+    if group_counts:
+        lines.append(f"## 表族分布 (Top 30，共 {len(group_counts)} 族)")
+        lines.append("| 族 | 表数 | Wiki 页面 |")
+        lines.append("|----|------|-----------|")
+        for g, c in group_counts.most_common(30):
+            slug = re.sub(r"[^\w.-]+", "_", g).strip("_") or "_group"
+            lines.append(f"| `{g}` | {c} | tables/{slug}.md |")
         lines.append("")
 
     lines.append("## Wiki 页面清单")

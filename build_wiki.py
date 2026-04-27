@@ -22,10 +22,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import batch_convert
 import wiki_extractor
+import table_analyzer
 import graph_builder
+import graph_viz
 
 
-STAGES = ("convert", "extract", "graph")
+STAGES = ("convert", "extract", "tables", "graph", "viz")
 
 
 def run(stage: str | None = None, force: bool = False,
@@ -44,8 +46,12 @@ def run(stage: str | None = None, force: bool = False,
             )
         elif s == "extract":
             wiki_extractor.extract_all(force=force, only=only)
+        elif s == "tables":
+            table_analyzer.run(force=force)
         elif s == "graph":
             graph_builder.run()
+        elif s == "viz":
+            graph_viz.run()
 
 
 if __name__ == "__main__":

@@ -7,16 +7,18 @@ kb-builder is a **game design knowledge base builder** that converts 策划 docx
 ## Common Commands
 
 ```bash
-# Full pipeline (convert -> extract -> graph), incremental
+# Full pipeline (convert -> extract -> tables -> graph), incremental
 python build_wiki.py
 
-# Force reconvert + re-extract everything
+# Force reconvert + re-extract + rescan xlsx
 python build_wiki.py --force
 
 # Run a single stage
 python build_wiki.py --stage convert     # docx -> .cache md
 python build_wiki.py --stage extract     # md -> wiki page + entities/relationships (LLM)
-python build_wiki.py --stage graph       # meta -> graph.json + index.md (deterministic)
+python build_wiki.py --stage tables      # xlsx -> table schemas + FK + wiki/tables/*.md (deterministic)
+python build_wiki.py --stage graph       # meta + schemas -> graph.json + index.md (deterministic)
+python build_wiki.py --stage viz         # graph.json + FK registry -> graph.html (interactive vis.js)
 
 # Extract one doc only (useful for iterating on prompts)
 python build_wiki.py --stage extract --only 装备异化.docx
@@ -24,7 +26,9 @@ python build_wiki.py --stage extract --only 装备异化.docx
 # Individual scripts (direct invocation)
 python batch_convert.py
 python wiki_extractor.py [--force] [--only FILE.docx]
+python table_analyzer.py [--force]
 python graph_builder.py
+python graph_viz.py [--open]
 ```
 
 No build/test/lint tooling is wired — scripts run directly.
@@ -41,19 +45,25 @@ knowledge/gamedocs/.cache/*.md           ← raw markdown per doc
        │   outputs: wiki page + entities/relationships
        ▼
 knowledge/wiki/
-  ├── systems/*.md          system_rule pages
-  ├── tables/*.md           table_schema pages
-  ├── numerical/*.md        numerical_convention pages
-  ├── activities/*.md       activity_template pages
-  ├── combat/*.md           combat_framework pages
-  └── _meta/<stem>.json     sidecar: entities, relationships, content_hash
+  ├── systems/*.md          system_rule pages (LLM-generated)
+  ├── tables/*.md           table_schema pages (one per family, deterministic)
+  ├── numerical/*.md        numerical_convention pages (LLM-generated)
+  ├── activities/*.md       activity_template pages (LLM-generated)
+  ├── combat/*.md           combat_framework pages (LLM-generated)
+  ├── _meta/<stem>.json     sidecar per docx: entities, relationships, content_hash
+  └── _tables/              deterministic xlsx analysis (table_analyzer.py)
+      ├── schemas.json           all 7500+ tables with fields/path/mtime/group
+      ├── groups.json            family → member-table list
+      └── table_fk_registry.json all FK edges detected by field convention
        │   graph_builder.py  (deterministic Python, no LLM)
        ▼
-knowledge/wiki/graph.json   ← merged entity graph per WIKI_ARCHITECTURE.md §5.2
-knowledge/wiki/index.md     ← stats, type breakdown, top entities, page list
+knowledge/wiki/graph.json   ← merged graph: doc nodes + entity nodes + table nodes
+knowledge/wiki/index.md     ← stats, type breakdown, top entities, doc→table, table families
 ```
 
-`knowledge/gamedata/*.xlsx` (7500+ tables) is **not** converted — its filenames are injected into the extractor prompt so LLM can reference tables by exact name.
+`knowledge/gamedata/*.xlsx` (7500+ tables) feeds two places:
+- Filenames injected into LLM extractor prompt (so LLM references tables by exact name)
+- `table_analyzer.py` reads each header row to produce schemas + FK edges + per-family pages
 
 ## Key Files
 
@@ -63,7 +73,9 @@ knowledge/wiki/index.md     ← stats, type breakdown, top entities, page list
 | `batch_convert.py` | Orchestrates docx→md conversion under `knowledge/gamedocs/` |
 | `wiki_specs/*.md` | 5 spec templates used as prompt fragments (system_rule, table_schema, numerical_convention, activity_template, combat_framework) |
 | `wiki_extractor.py` | Per-docx LLM extraction → wiki page + meta sidecar |
-| `graph_builder.py` | Merges meta sidecars into graph.json + index.md (deterministic) |
+| `table_analyzer.py` | Scans all xlsx → schemas.json, groups.json, table_fk_registry.json, wiki/tables/*.md (deterministic, zero LLM) |
+| `graph_builder.py` | Merges doc metas + table schemas into graph.json + index.md (deterministic) |
+| `graph_viz.py` | Produces self-contained interactive `wiki/graph.html` (vis.js CDN); filters to docs + LLM entities + FK-connected tables |
 | `build_wiki.py` | CLI orchestrator |
 | `old/` | Archived legacy pipeline (wiki_compiler, eval_wiki, init, etc.) — kept for reference, not imported |
 
@@ -78,6 +90,10 @@ knowledge/wiki/index.md     ← stats, type breakdown, top entities, page list
 - **Graph determinism**: nodes sorted by entity name; edges sorted by `(source, target, relation, from_doc)`. Same meta input → byte-identical `graph.json`.
 - **Entity type conflicts** (same name, different types across docs): majority vote, alphabetical tie-break, warning to stderr.
 - **xlsx filename list** is truncated to 500 names in the prompt to cap token cost.
+- **Table families** are derived by (1) folder prefix and (2) PascalCase first-word grouping (salvaged from [old/wiki_compiler.py:105](old/wiki_compiler.py#L105)). Singletons go to `_misc`.
+- **FK detection** is convention-based: a field matching `^(.+?)[_]?[Ii][Dd]s?$` whose stem (case-insensitive) matches another table name becomes a `references` FK edge. Stored in `_tables/table_fk_registry.json`, not in `graph.json` (to keep the graph focused on entities/docs/tables rather than inter-table edges).
+- **Table cache**: `_tables/schemas.json` keys each table by `(rel_path, mtime, size)`. Unchanged xlsx files are reused from cache on rerun — full rescan of 7500 tables takes ~3min first time, ~1s thereafter.
+- **Table header detection**: reads first 3 rows, picks the row with highest identifier-like score (English field names preferred over Chinese comment rows). Imperfect on mixed headers — some tables end up with Chinese headers.
 
 ## Data Integrity
 
