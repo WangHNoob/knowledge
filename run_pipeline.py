@@ -97,9 +97,9 @@ def main() -> None:
     if args.only:
         kb_args += ["--only", args.only]
 
-    print(f"== [2/2] 运行 pipeline: kb-builder {' '.join(kb_args) or '(all stages)'} ==")
+    print(f"== [2/2] 运行 pipeline: python -m scripts {' '.join(kb_args) or '(all stages)'} ==")
     run_result = subprocess.run(
-        [uv, "run", "kb-builder"] + kb_args,
+        [uv, "run", "python", "-m", "scripts"] + kb_args,
         cwd=root,
         env=env,
     )

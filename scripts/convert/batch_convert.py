@@ -9,8 +9,8 @@
 """
 import os
 
-from .config import PATHS
-from .doc_reader import scan_dir, read_doc
+from scripts.config import PATHS
+from scripts.doc_reader import scan_dir, read_doc
 
 
 def batch_convert(input_dir=None, force=False):

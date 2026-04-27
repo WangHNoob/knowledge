@@ -47,7 +47,7 @@ def build_paths() -> ProjectPaths:
     )
     wiki_specs_dir = _resolve_dir(
         os.getenv("KB_WIKI_SPECS_DIR"),
-        project_root / "wiki_specs",
+        data_root / "processed" / "wiki_specs",
     )
     wiki_dir = data_root / "wiki"
     wiki_tables_registry_dir = wiki_dir / "_tables"

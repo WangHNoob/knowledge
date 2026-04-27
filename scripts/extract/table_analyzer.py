@@ -29,7 +29,7 @@ import re
 import time
 from typing import Optional
 
-from .config import PATHS
+from scripts.config import PATHS
 
 PROJECT_ROOT = str(PATHS.project_root)
 GAMEDATA_DIR = str(PATHS.gamedata_dir)

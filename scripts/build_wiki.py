@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import argparse
 
-from . import batch_convert
-from . import graph_builder
-from . import graph_viz
-from . import table_analyzer
-from . import wiki_extractor
-from .config import PATHS
+from scripts.convert.batch_convert import batch_convert
+from scripts.extract.wiki_extractor import extract_all as wiki_extract_all
+from scripts.extract.table_analyzer import run as table_run
+from scripts.graph.graph_builder import run as graph_build_run
+from scripts.graph.graph_viz import run as graph_viz_run
+from scripts.config import PATHS
 
 
 STAGES = ("convert", "extract", "tables", "graph", "viz")
@@ -37,18 +37,18 @@ def run(stage: str | None = None, force: bool = False,
     for s in stages:
         print(f"\n========== stage: {s} ==========")
         if s == "convert":
-            batch_convert.batch_convert(
+            batch_convert(
                 input_dir=str(PATHS.gamedocs_dir),
                 force=force,
             )
         elif s == "extract":
-            wiki_extractor.extract_all(force=force, only=only)
+            wiki_extract_all(force=force, only=only)
         elif s == "tables":
-            table_analyzer.run(force=force)
+            table_run(force=force)
         elif s == "graph":
-            graph_builder.run()
+            graph_build_run()
         elif s == "viz":
-            graph_viz.run()
+            graph_viz_run()
 
 
 if __name__ == "__main__":

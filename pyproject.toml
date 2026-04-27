@@ -15,8 +15,10 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
-[project.scripts]
-kb-builder = "kb_builder.cli:main"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scripts"]
+exclude = ["old", "knowledge", "kb_builder", "wiki_specs", "llm-wiki-agent*", "references", "references*"]
 
 [project.optional-dependencies]
 graph = [
@@ -29,6 +31,3 @@ llm = [
 dev = [
     "kb-builder[graph,llm]",
 ]
-
-[tool.setuptools]
-packages = ["kb_builder"]

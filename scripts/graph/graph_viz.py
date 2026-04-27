@@ -22,7 +22,7 @@ import json
 import os
 import webbrowser
 
-from .config import PATHS
+from scripts.config import PATHS
 
 PROJECT_ROOT = str(PATHS.project_root)
 WIKI_DIR = str(PATHS.wiki_dir)

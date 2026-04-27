@@ -17,7 +17,7 @@ import os
 import re
 import sys
 
-from .config import PATHS
+from scripts.config import PATHS
 
 PROJECT_ROOT = str(PATHS.project_root)
 WIKI_DIR = str(PATHS.wiki_dir)

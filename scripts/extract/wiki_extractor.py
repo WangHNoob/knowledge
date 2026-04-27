@@ -22,7 +22,7 @@ import os
 import re
 from typing import Optional
 
-from .config import PATHS
+from scripts.config import PATHS
 
 PROJECT_ROOT = str(PATHS.project_root)
 GAMEDOCS_DIR = str(PATHS.gamedocs_dir)
