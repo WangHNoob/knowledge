@@ -64,33 +64,8 @@ def _filter_subgraph(graph: dict, fk_edges: list[dict]) -> tuple[list, list]:
 
     id_to_node = {n["id"]: n for n in nodes}
 
-    # seed：非 table 节点 + LLM 抽取时作为实体出现的 table 节点
-    # 这里判定"LLM 抽取的 table"：graph.json 里的 table 节点没有 group 字段（有 group
-    # 的是 table_analyzer 新加的全量 table）。
-    seed: set[str] = set()
-    for n in nodes:
-        if n["type"] != "table":
-            seed.add(n["id"])
-        else:
-            if "group" not in n:  # LLM 侧扩展出来的 table
-                seed.add(n["id"])
-
-    # 所有出现在 FK 边中的表节点都拉进视图（用户要求拉全量 705 条 FK）
-    fk_nodes: set[str] = set()
-    for e in fk_edges:
-        fk_nodes.add(e["source"])
-        fk_nodes.add(e["target"])
-
-    # seed 沿 FK 1 跳邻居（冗余安全）
-    fk_neighbors: set[str] = set()
-    for e in fk_edges:
-        if e["source"] in seed:
-            fk_neighbors.add(e["target"])
-        if e["target"] in seed:
-            fk_neighbors.add(e["source"])
-
-    keep = seed | fk_neighbors | fk_nodes
-    keep &= set(id_to_node.keys())
+    # 所有节点全部写入 HTML，vis.js 的类型过滤器负责展示过滤
+    keep = set(id_to_node.keys())
 
     # 收集边：现有 graph.json 的边（两端都在 keep）+ FK 边（两端都在 keep）
     kept_edges: list[dict] = []
