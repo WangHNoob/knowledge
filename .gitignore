@@ -27,12 +27,18 @@ desktop.ini
 # WorkBuddy internal
 .workbuddy/
 
-# processed/ and wiki/ dir structure tracked via .gitkeep, contents ignored
+# processed/ dir: tools/ and wiki_specs/ tracked fully; parsed/ structure only
 processed/*
+!processed/.gitkeep
+!processed/parsed/
+!processed/tools/
+!processed/wiki_specs/
+processed/parsed/*
+!processed/parsed/.gitkeep
+# raw/, wiki/ dir structure tracked via .gitkeep, contents ignored
 raw/gamedocs/*
 raw/gamedata/*
 wiki/*
-!processed/.gitkeep
 !raw/gamedocs/.gitkeep
 !raw/gamedata/.gitkeep
 !wiki/.gitkeep
