@@ -27,22 +27,11 @@ desktop.ini
 # WorkBuddy internal
 .workbuddy/
 
-# Knowledge base source data (size: tracked dirs, ignored contents)
-raw/gamedata/
-raw/gamedocs/
-
-# Knowledge base caches and generated artifacts
-knowledge/wiki/
-knowledge/graph/
-knowledge/table_registry.json
-knowledge/index.db
-knowledge/index.db-wal
-knowledge/index.db-shm
-
 # processed/ and wiki/ dir structure tracked via .gitkeep, contents ignored
 processed/*
 raw/gamedocs/*
 raw/gamedata/*
+wiki/*
 !processed/.gitkeep
 !raw/gamedocs/.gitkeep
 !raw/gamedata/.gitkeep
