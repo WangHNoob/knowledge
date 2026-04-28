@@ -361,12 +361,18 @@ def _build_keyword_index(
     """
     kw_map: dict[str, set[str]] = collections.defaultdict(set)
 
-    # Entity & table names from graph nodes
+    # Entity & table names from graph nodes.
+    # Skip individual table entries (names containing "/") — they all point to
+    # the same group page and bloating the keyword index. Use rg for exact
+    # table name lookups instead.
     for n in nodes:
         name = n["id"]
         wp = n.get("wiki_page") or ""
-        if wp:
-            kw_map[name].add(wp)
+        if not wp:
+            continue
+        if n["type"] == "table" and "/" in name:
+            continue
+        kw_map[name].add(wp)
 
     # Table group names -> their table_schema page
     for n in nodes:
