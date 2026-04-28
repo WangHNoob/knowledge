@@ -245,124 +245,398 @@ def write_graph(graph: dict) -> None:
         json.dump(serializable, f, ensure_ascii=False, indent=2, sort_keys=False)
 
 
+def _count_wiki_pages_by_type() -> dict[str, list[dict]]:
+    """Scan wiki directories for all .md files, group by frontmatter type.
+
+    Returns {page_type: [{title, wiki_path, source, summary, tables, entities}, ...]}.
+    This covers ALL wiki pages (LLM-extracted + deterministically generated),
+    not just those with _meta/*.json entries.
+    """
+    result: dict[str, list[dict]] = collections.defaultdict(list)
+    yaml_pat = re.compile(r"^---\s*$")
+
+    for page_type, dirname in PAGE_TYPE_DIRS.items():
+        dir_path = os.path.join(WIKI_DIR, dirname)
+        if not os.path.isdir(dir_path):
+            continue
+        for fn in sorted(os.listdir(dir_path)):
+            if not fn.endswith(".md"):
+                continue
+            fpath = os.path.join(dir_path, fn)
+            wiki_path = f"{dirname}/{fn}"
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                continue
+
+            # Parse YAML frontmatter
+            lines = content.split("\n")
+            fm: dict[str, str] = {}
+            in_fm = False
+            fm_closed = False
+            fm_end_line: int | None = None
+            for i, line in enumerate(lines):
+                if yaml_pat.match(line):
+                    if not in_fm:
+                        in_fm = True
+                        continue
+                    else:
+                        fm_closed = True
+                        fm_end_line = i
+                        break
+                if in_fm:
+                    m = re.match(r"^(\w+):\s*(.*)", line)
+                    if m:
+                        fm[m.group(1)] = m.group(2).strip().strip('"')
+
+            # Extract first substantive paragraph after frontmatter
+            summary = ""
+            if fm_closed and fm_end_line is not None:
+                for i in range(fm_end_line + 1, len(lines)):
+                    stripped = lines[i].strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    summary = stripped
+                    break
+
+            entry = {
+                "title": fm.get("title") or fn.replace(".md", ""),
+                "wiki_path": wiki_path,
+                "source": fm.get("source", ""),
+                "summary": summary,
+            }
+            result[page_type].append(entry)
+
+    # Sort each group by title
+    for pt in result:
+        result[pt].sort(key=lambda m: m["title"])
+    return result
+
+
+def _extract_page_tables(nodes: list[dict], metas: list[dict]) -> dict[str, list[str]]:
+    """Build mapping: wiki_page_path -> list of table names mentioned.
+
+    Sources: doc->table edges from graph, and entity->table configured_in from metas.
+    """
+    page_tables: dict[str, set[str]] = collections.defaultdict(set)
+
+    # From meta: title -> wiki_path, plus entities of type table
+    for m in metas:
+        wp = m.get("wiki_path") or ""
+        if not wp:
+            continue
+        for e in m.get("entities") or []:
+            if e.get("type") == "table":
+                page_tables[wp].add(e["name"])
+
+    # From graph: doc nodes reference table nodes
+    wp_map = {n["id"]: n.get("wiki_page") or "" for n in nodes}
+    type_map = {n["id"]: n["type"] for n in nodes}
+
+    return {wp: sorted(list(tables)) for wp, tables in page_tables.items()}
+
+
+def _extract_page_entities(metas: list[dict]) -> dict[str, list[str]]:
+    """Build mapping: wiki_page_path -> list of non-table entity names mentioned."""
+    page_ents: dict[str, set[str]] = collections.defaultdict(set)
+    for m in metas:
+        wp = m.get("wiki_path") or ""
+        if not wp:
+            continue
+        for e in m.get("entities") or []:
+            if e.get("type") != "table":
+                page_ents[wp].add(e["name"])
+    return {wp: sorted(list(ents)) for wp, ents in page_ents.items()}
+
+
+def _build_keyword_index(
+    nodes: list[dict],
+    wikipages_by_type: dict[str, list[dict]],
+) -> dict[str, list[str]]:
+    """Build keyword -> [wiki_page, ...] index for concept-based lookup.
+
+    Keywords sourced from: entity names, table names, wiki page titles,
+    table group names. Grouped by first character for readability.
+    """
+    kw_map: dict[str, set[str]] = collections.defaultdict(set)
+
+    # Entity & table names from graph nodes
+    for n in nodes:
+        name = n["id"]
+        wp = n.get("wiki_page") or ""
+        if wp:
+            kw_map[name].add(wp)
+
+    # Table group names -> their table_schema page
+    for n in nodes:
+        if n["type"] == "table":
+            g = n.get("group") or ""
+            wp = n.get("wiki_page") or ""
+            if g and wp:
+                kw_map[g].add(wp)
+
+    # Wiki page titles -> their own page
+    for entries in wikipages_by_type.values():
+        for e in entries:
+            title = e["title"]
+            wp = e["wiki_path"]
+            if title and wp:
+                kw_map[title].add(wp)
+
+    # Deduplicate and sort
+    return {k: sorted(v) for k, v in kw_map.items()}
+
+
+def _build_relationship_lists(
+    edges: list[dict],
+    nodes: list[dict],
+    metas: list[dict],
+) -> dict[str, list[dict]]:
+    """Group non-doc edges by relation type, with readable labels.
+
+    Returns {relation_type: [{source, target, from_doc}, ...]}.
+    """
+    type_map = {n["id"]: n["type"] for n in nodes}
+    result: dict[str, list[dict]] = collections.defaultdict(list)
+
+    for e in edges:
+        # Skip doc->table references (shown in doc->table section)
+        if type_map.get(e["source"]) == "doc":
+            continue
+        rel = e["relation"]
+        result[rel].append({
+            "source": e["source"],
+            "target": e["target"],
+            "from_doc": e.get("from_doc", ""),
+        })
+
+    # Sort each list
+    for rel in result:
+        result[rel].sort(key=lambda r: (r["source"], r["target"]))
+
+    return dict(result)
+
+
+# 关系类型的中文标签
+REL_LABELS: dict[str, str] = {
+    "depends_on": "依赖 (depends_on)",
+    "unlocks": "解锁 (unlocks)",
+    "produces": "产出 (produces)",
+    "consumes": "消耗 (consumes)",
+    "belongs_to": "归属 (belongs_to)",
+    "references": "引用 (references)",
+    "configured_in": "配置于 (configured_in)",
+}
+
+# 关系类型的展示顺序
+REL_ORDER: list[str] = [
+    "depends_on", "unlocks", "belongs_to",
+    "produces", "consumes", "configured_in", "references",
+]
+
+
 def write_index(graph: dict, metas: list[dict]) -> None:
     nodes = graph["nodes"]
     edges = graph["edges"]
 
-    # 按页面类型分组
-    by_type: dict[str, list[dict]] = collections.defaultdict(list)
-    for m in metas:
-        pt = m.get("page_type") or "unknown"
-        by_type[pt].append(m)
-
-    # 入度统计：最常被引用的实体（排除 doc->entity 边，避免文档引用稀释实体间排名）
     type_map = {n["id"]: n["type"] for n in nodes}
-    indeg: collections.Counter = collections.Counter()
-    for e in edges:
-        if type_map.get(e["source"]) == "doc":
-            continue
-        indeg[e["target"]] += 1
-    top_entities = indeg.most_common(20)
+    page_map = {n["id"]: n.get("wiki_page") or "" for n in nodes}
 
-    # 类型分布
-    type_dist: collections.Counter = collections.Counter(n["type"] for n in nodes)
-    rel_dist: collections.Counter = collections.Counter(e["relation"] for e in edges)
+    # ── P0 fix: count ALL wiki pages from filesystem, not just meta ──
+    wikipages_by_type = _count_wiki_pages_by_type()
+    page_tables = _extract_page_tables(nodes, metas)
+    page_entities = _extract_page_entities(metas)
+    keyword_index = _build_keyword_index(nodes, wikipages_by_type)
+    rel_lists = _build_relationship_lists(edges, nodes, metas)
 
-    # 文档 -> 表 引用视图
-    doc_to_tables: dict[str, list[str]] = collections.defaultdict(list)
-    for e in edges:
-        if type_map.get(e["source"]) == "doc" and type_map.get(e["target"]) == "table":
-            doc_to_tables[e["source"]].append(e["target"])
-
-    lines: list[str] = []
-    lines.append("---")
-    lines.append("title: Wiki Knowledge Index")
-    lines.append("type: index")
-    lines.append("---")
-    lines.append("")
-    lines.append("# Wiki 知识索引")
-    lines.append("")
+    # ── Statistics ──
+    total_wiki_pages = sum(len(v) for v in wikipages_by_type.values())
     doc_node_count = sum(1 for n in nodes if n["type"] == "doc")
     table_node_count = sum(1 for n in nodes if n["type"] == "table")
     entity_node_count = len(nodes) - doc_node_count - table_node_count
 
-    lines.append("## 概览")
-    lines.append(f"- 文档数: {len(metas)} (图中 doc 节点: {doc_node_count})")
-    lines.append(f"- 配置表数: {table_node_count}")
-    lines.append(f"- 其它实体数: {entity_node_count}")
-    lines.append(f"- 关系数: {len(edges)}")
-    error_docs = [m for m in metas if m.get("error")]
-    if error_docs:
-        lines.append(f"- 提取失败: {len(error_docs)}")
-    lines.append("")
+    indeg: collections.Counter = collections.Counter()
+    for e in edges:
+        if type_map.get(e["source"]) != "doc":
+            indeg[e["target"]] += 1
+    top_entities = indeg.most_common(20)
 
-    lines.append("## 页面类型分布")
-    for page_type, dirname in PAGE_TYPE_DIRS.items():
-        count = len(by_type.get(page_type, []))
-        lines.append(f"- `{page_type}` ({dirname}/): {count}")
-    lines.append("")
+    type_dist: collections.Counter = collections.Counter(
+        n["type"] for n in nodes
+    )
+    rel_dist: collections.Counter = collections.Counter(
+        e["relation"] for e in edges
+    )
 
-    lines.append("## 实体类型分布")
-    for t, c in sorted(type_dist.items(), key=lambda kv: (-kv[1], kv[0])):
-        lines.append(f"- `{t}`: {c}")
-    lines.append("")
+    doc_to_tables: dict[str, set[str]] = collections.defaultdict(set)
+    for e in edges:
+        if type_map.get(e["source"]) == "doc" and type_map.get(e["target"]) == "table":
+            doc_to_tables[e["source"]].add(e["target"])
 
-    lines.append("## 关系类型分布")
-    for t, c in sorted(rel_dist.items(), key=lambda kv: (-kv[1], kv[0])):
-        lines.append(f"- `{t}`: {c}")
-    lines.append("")
-
-    if top_entities:
-        lines.append("## 被引用最多的实体 (Top 20，仅实体间关系)")
-        lines.append("| 实体 | 被引用次数 | 类型 | Wiki 页面 |")
-        lines.append("|------|-----------|------|-----------|")
-        page_map = {n["id"]: n["wiki_page"] for n in nodes}
-        for name, count in top_entities:
-            page = page_map.get(name) or "—"
-            lines.append(f"| {name} | {count} | {type_map.get(name, '?')} | {page} |")
-        lines.append("")
-
-    if doc_to_tables:
-        lines.append("## 文档 → 引用的配置表")
-        for doc in sorted(doc_to_tables.keys()):
-            tables = sorted(set(doc_to_tables[doc]))
-            lines.append(f"- **{doc}** ({len(tables)}): " + ", ".join(
-                f"`{t}`" for t in tables
-            ))
-        lines.append("")
-
-    # 表族汇总
     group_counts: collections.Counter = collections.Counter()
     for n in nodes:
         if n["type"] == "table":
             group_counts[n.get("group") or "_misc"] += 1
-    if group_counts:
-        lines.append(f"## 表族分布 (Top 30，共 {len(group_counts)} 族)")
-        lines.append("| 族 | 表数 | Wiki 页面 |")
-        lines.append("|----|------|-----------|")
-        for g, c in group_counts.most_common(30):
-            slug = re.sub(r"[^\w.-]+", "_", g).strip("_") or "_group"
-            lines.append(f"| `{g}` | {c} | tables/{slug}.md |")
-        lines.append("")
 
-    lines.append("## Wiki 页面清单")
-    for page_type, dirname in PAGE_TYPE_DIRS.items():
-        subset = sorted(by_type.get(page_type, []), key=lambda m: m.get("title") or "")
-        if not subset:
-            continue
-        lines.append(f"### {page_type} — `{dirname}/`")
-        for m in subset:
-            title = m.get("title") or m.get("source")
-            src = m.get("source")
-            wp = m.get("wiki_path") or "?"
-            lines.append(f"- [{title}]({wp}) — 来源: {src}")
-        lines.append("")
+    error_docs = [m for m in metas if m.get("error")]
+    page_type_counts = {
+        pt: len(pages) for pt, pages in wikipages_by_type.items()
+    }
 
+    # ── Generate markdown ──
+    lines: list[str] = []
+    L = lines.append
+
+    L("---")
+    L("title: Wiki Knowledge Index")
+    L("type: index")
+    L("---")
+    L("")
+    L("# Wiki 知识索引")
+    L("")
+
+    # ── 1. 概览 ──
+    L("## 概览")
+    L(f"- 源文档数: {len(metas)}")
+    L(f"- Wiki 页面总数: {total_wiki_pages}")
+    L(f"- 图谱节点: {len(nodes)} (doc {doc_node_count} + 实体 {entity_node_count} + 表 {table_node_count})")
+    L(f"- 图谱边: {len(edges)}")
     if error_docs:
-        lines.append("## 提取失败文档")
+        L(f"- 提取失败文档: {len(error_docs)}")
+    L("")
+
+    # ── 2. 页面类型分布 ──
+    L("## 页面类型分布")
+    L("| 类型 | 目录 | 页面数 |")
+    L("|------|------|--------|")
+    for page_type, dirname in PAGE_TYPE_DIRS.items():
+        count = page_type_counts.get(page_type, 0)
+        L(f"| `{page_type}` | `{dirname}/` | {count} |")
+    L("")
+
+    # ── 3. 实体类型分布 ──
+    L("## 实体类型分布")
+    for t, c in sorted(type_dist.items(), key=lambda kv: (-kv[1], kv[0])):
+        L(f"- `{t}`: {c}")
+    L("")
+
+    # ── 4. 关系类型分布 ──
+    L("## 关系类型分布")
+    for t, c in sorted(rel_dist.items(), key=lambda kv: (-kv[1], kv[0])):
+        L(f"- `{t}`: {c}")
+    L("")
+
+    # ── 5. 概念 → 页面 关键词索引 ──
+    if keyword_index:
+        L("## 概念/关键词 → Wiki 页面（快速检索）")
+        L("")
+        L("> 按名称查找实体、系统、活动、配置表族对应的 Wiki 页面。")
+        L("")
+        # Group by first character for readability
+        by_char: dict[str, list[tuple[str, list[str]]]] = collections.defaultdict(
+            list
+        )
+        for kw, pages in keyword_index.items():
+            if not kw.strip():
+                continue
+            by_char[kw[0].upper()].append((kw, pages))
+        for char in sorted(by_char.keys()):
+            items = sorted(by_char[char], key=lambda x: x[0].lower())
+            L(f"### {char}")
+            for kw, pages in items:
+                links = " · ".join(f"[{p}]({p})" for p in pages)
+                L(f"- **{kw}** → {links}")
+            L("")
+        L("")
+
+    # ── 6. 实体间关系清单 ──
+    if rel_lists:
+        L("## 实体间关系清单")
+        L("")
+        for rel in REL_ORDER:
+            entries = rel_lists.get(rel, [])
+            if not entries:
+                continue
+            label = REL_LABELS.get(rel, rel)
+            L(f"### {label} ({len(entries)} 条)")
+            # Deduplicate (source, target) pairs
+            seen: set[tuple[str, str]] = set()
+            for r in entries:
+                key = (r["source"], r["target"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                src_page = page_map.get(r["source"], "")
+                tgt_page = page_map.get(r["target"], "")
+                src_link = f"[{r['source']}]({src_page})" if src_page else r["source"]
+                tgt_link = f"[{r['target']}]({tgt_page})" if tgt_page else r["target"]
+                L(f"- {src_link} → {tgt_link}")
+            L("")
+
+    # ── 7. 文档 → 引用的配置表 ──
+    if doc_to_tables:
+        L("## 文档 → 引用的配置表")
+        for doc in sorted(doc_to_tables.keys()):
+            tables = sorted(doc_to_tables[doc])
+            L(f"- **{doc}** ({len(tables)}): " + ", ".join(
+                f"`{t}`" for t in tables
+            ))
+        L("")
+
+    # ── 8. 表族分布（全量） ──
+    if group_counts:
+        L(f"## 表族分布（共 {len(group_counts)} 族）")
+        L("| 族 | 表数 | Wiki 页面 |")
+        L("|----|------|-----------|")
+        for g, c in group_counts.most_common():
+            slug = re.sub(r"[^\w.-]+", "_", g).strip("_") or "_group"
+            L(f"| `{g}` | {c} | tables/{slug}.md |")
+        L("")
+
+    # ── 9. Wiki 页面清单（含摘要 + 关联表） ──
+    L("## Wiki 页面清单")
+    for page_type, dirname in PAGE_TYPE_DIRS.items():
+        entries = wikipages_by_type.get(page_type, [])
+        if not entries:
+            L(f"### {page_type} — `{dirname}/`")
+            L("")
+            L("*（暂无页面）*")
+            L("")
+            continue
+        L(f"### {page_type} — `{dirname}/` ({len(entries)} 页)")
+        for e in entries:
+            wp = e["wiki_path"]
+            title = e["title"]
+            src = e["source"]
+            summary = e["summary"]
+            tables = page_tables.get(wp, [])
+            entities = page_entities.get(wp, [])
+
+            # Build metadata line
+            meta_parts: list[str] = []
+            if src:
+                meta_parts.append(f"来源: {src}")
+            if summary:
+                # Truncate summary to keep index compact
+                s = summary[:120] + "…" if len(summary) > 120 else summary
+                meta_parts.append(s)
+            if tables:
+                meta_parts.append("关联表: " + ", ".join(f"`{t}`" for t in tables[:8]))
+            if entities:
+                meta_parts.append("实体: " + ", ".join(entities[:8]))
+
+            L(f"- **[{title}]({wp})**")
+            if meta_parts:
+                L(f"  {' · '.join(meta_parts)}")
+        L("")
+
+    # ── 10. 提取失败文档 ──
+    if error_docs:
+        L("## 提取失败文档")
         for m in error_docs:
-            lines.append(f"- {m.get('source')}: {m.get('error')}")
-        lines.append("")
+            L(f"- {m.get('source')}: {m.get('error')}")
+        L("")
 
     with open(INDEX_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
